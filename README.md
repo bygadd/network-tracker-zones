@@ -4,9 +4,9 @@ Network Tracker Zones assigns Home Assistant's native **Associated zone** option
 
 It does not create trackers, poll network devices, modify source credentials, define zones, or change `person` configuration.
 
-## Authorship and AI assistance
+## Author and AI assistance
 
-Network Tracker Zones is authored and maintained by [Yoan Bozhilov](https://github.com/bygadd). AI coding tools, including OpenAI Codex, have assisted with implementation, tests, and documentation under his direction. Yoan defines the requirements, tests the integration in his Home Assistant setup, and makes the release decisions.
+I am [Yoan Bozhilov](https://github.com/bygadd), the author and maintainer of Network Tracker Zones. I use AI coding tools, including OpenAI Codex, to assist with implementation, tests, and documentation. I set the project requirements and decide what to publish.
 
 ## Installation and configuration
 
