@@ -1,11 +1,13 @@
 """Exercise Home Assistant's real config and options flow managers."""
 import pytest
 from unittest.mock import patch
+from probatio import to_field_list
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.data_entry_flow import InvalidData
 from homeassistant.loader import async_get_integration_descriptions
 from homeassistant.helpers.translation import async_get_translations
+from homeassistant.helpers import config_validation as cv
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.network_tracker_zones import Rule, async_setup_entry, async_unload_entry
@@ -29,6 +31,10 @@ async def test_custom_translations_include_confirmation_steps(hass):
         )
         assert f"component.{DOMAIN}.options.step.confirm_zone_change.title" in translated
         assert f"component.{DOMAIN}.options.step.confirm.title" in translated
+        assert f"component.{DOMAIN}.options.step.confirm_zone_change.data.preview" in translated
+        assert f"component.{DOMAIN}.options.step.confirm_zone_change.data.confirm" in translated
+        assert f"component.{DOMAIN}.options.step.confirm.data.preview" in translated
+        assert f"component.{DOMAIN}.options.step.confirm.data.confirm" in translated
 
 
 async def test_create_and_duplicate(hass, source, zones):
@@ -85,7 +91,16 @@ async def test_options_merge_and_validation(hass, source, zones):
     result = await hass.config_entries.options.async_configure(form["flow_id"], {"zone": "zone.beta"})
     assert result["step_id"] == "confirm_zone_change"
     assert result["description_placeholders"]["count"] == "0"
-    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
+    fields = to_field_list(result["data_schema"], custom_serializer=cv.custom_serializer)
+    assert [field["name"] for field in fields] == ["preview", "confirm"]
+    assert fields[0]["default"].startswith("zone.beta (0)")
+    assert fields[1]["default"] is False
+    assert result["data_schema"]({})["confirm"] is False
+    preview = result["data_schema"]({})["preview"]
+    blocked = await hass.config_entries.options.async_configure(result["flow_id"], {})
+    assert blocked["type"] == FlowResultType.FORM
+    assert blocked["errors"] == {"confirm": "confirmation_required"}
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"preview": preview, "confirm": True})
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert entry.options == {"zone": "zone.beta", "future_option": True}
 
@@ -116,7 +131,10 @@ async def test_options_audit_and_confirm_repair(hass, source, zones, registry, t
     )
     assert confirm["step_id"] == "confirm"
     assert confirm["description_placeholders"]["count"] == "1"
-    result = await hass.config_entries.options.async_configure(confirm["flow_id"], {})
+    preview = confirm["data_schema"]({})["preview"]
+    blocked = await hass.config_entries.options.async_configure(confirm["flow_id"], {})
+    assert blocked["errors"] == {"confirm": "confirmation_required"}
+    result = await hass.config_entries.options.async_configure(confirm["flow_id"], {"preview": preview, "confirm": True})
     assert result["type"] == FlowResultType.ABORT
     assert result["reason"] == "repair_complete"
     assert result["description_placeholders"]["count"] == "1"
@@ -180,7 +198,12 @@ async def test_target_change_previews_only_managed_trackers(hass, source, zones,
     assert existing.entity_id not in preview["description_placeholders"]["trackers"]
     assert entry.options == {}
 
-    result = await hass.config_entries.options.async_configure(preview["flow_id"], {})
+    review_text = preview["data_schema"]({})["preview"]
+    assert new.entity_id in review_text
+    assert existing.entity_id not in review_text
+    blocked = await hass.config_entries.options.async_configure(preview["flow_id"], {"preview": "changed", "confirm": True})
+    assert blocked["errors"] == {"preview": "preview_modified"}
+    result = await hass.config_entries.options.async_configure(preview["flow_id"], {"preview": review_text, "confirm": True})
     assert result["type"] == FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
     assert registry.async_get(existing.entity_id).options == {}
@@ -208,7 +231,7 @@ async def test_target_change_rejects_stale_preview(hass, source, zones, registry
         client.entity_id, "device_tracker", {"associated_zone": "zone.home"}
     )
     await hass.async_block_till_done()
-    result = await hass.config_entries.options.async_configure(preview["flow_id"], {})
+    result = await hass.config_entries.options.async_configure(preview["flow_id"], {"preview": preview["data_schema"]({})["preview"], "confirm": True})
     assert result["type"] == FlowResultType.ABORT
     assert result["reason"] == "zone_preview_stale"
     assert entry.options == {}

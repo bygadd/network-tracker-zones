@@ -29,15 +29,17 @@ The integration reads the current `device_tracker.associated_zone` option. A mis
 
 ## Review existing trackers
 
-Open **Settings → Devices & services → Network Tracker Zones → Configure** on the rule for the relevant source, then choose **Review mismatched trackers**. The preview lists eligible trackers whose effective current zone differs from the rule target. A missing or null value is displayed as **unset (defaults to zone.home)**; a zone string is displayed as **explicit**. Select individual trackers or **All**, then confirm on the following screen. Opening the preview does not change any tracker.
+Open **Settings → Devices & services → Network Tracker Zones → Configure** on the rule for the relevant source, then choose **Review mismatched trackers**. The preview lists eligible trackers whose effective current zone differs from the rule target. A missing or null value is displayed as **unset (defaults to zone.home)**; a zone string is displayed as **explicit**. Select individual trackers or **All**, then review the list and check the confirmation box on the following screen. The preview field is for review only; leave its text unchanged. Opening the preview does not change any tracker.
 
 At confirmation, the integration rechecks the source, tracker identity, target zone, and current option. It skips entries changed since the preview. Only `device_tracker.associated_zone` is written; other options are preserved. A repaired tracker becomes managed by the rule. To preserve a later individual choice, change or clear its Associated zone manually.
 
-To change a rule's target, choose **Configure → Change target zone**. A separate confirmation screen lists the currently managed trackers that would change. Trackers protected as pre-existing or released after an external edit remain unchanged. Newly registered clients subsequently use the new target.
+To change a rule's target, choose **Configure → Change target zone**. A separate confirmation screen shows the target, count, and currently managed trackers that would change. Review the list, leave the preview field unchanged, and check the confirmation box to apply the change. An empty confirmation cannot update the rule. Trackers protected as pre-existing or released after an external edit remain unchanged. Newly registered clients subsequently use the new target.
 
 ## Upgrading from 0.1.0 or 0.1.1
 
 Earlier versions assigned the target zone to already registered trackers whose Associated zone was unset during initial setup. Version 0.1.2 stops this initial bulk assignment. It **does not automatically undo earlier writes**, because doing so could discard choices made after installation. Existing rule-managed trackers remain managed and appear in the preview when the rule target changes. To opt out an individual tracker, change or clear its Associated zone in Home Assistant.
+
+Version 0.1.3 adds a visible preview field and a required confirmation box to both change workflows. If an older version shows an empty **Options** window, close it without submitting, update the integration in HACS, and restart Home Assistant.
 
 ## Scope and limitations
 

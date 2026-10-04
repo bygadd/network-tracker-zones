@@ -37,7 +37,11 @@
       },
       "confirm_zone_change": {
         "title": "Confirm target zone change",
-        "description": "Change this rule to {target}? {count} managed tracker(s) currently qualify for an update:\n\n{trackers}\n\nPre-existing trackers not claimed by this rule remain unchanged."
+        "description": "Change this rule to {target}? {count} managed tracker(s) currently qualify for an update:\n\n{trackers}\n\nPre-existing trackers not claimed by this rule remain unchanged.",
+        "data": {
+          "preview": "Affected trackers (review without editing)",
+          "confirm": "I have reviewed this change and want to apply it"
+        }
       },
       "audit": {
         "title": "Review mismatched tracker zones",
@@ -48,13 +52,19 @@
       },
       "confirm": {
         "title": "Apply zone to existing trackers?",
-        "description": "Apply {target} to {count} selected tracker(s)?\n\n{trackers}\n\nTrackers changed since this preview will be skipped."
+        "description": "Apply {target} to {count} selected tracker(s)?\n\n{trackers}\n\nTrackers changed since this preview will be skipped.",
+        "data": {
+          "preview": "Selected trackers (review without editing)",
+          "confirm": "I have reviewed this repair and want to apply it"
+        }
       }
     },
     "error": {
       "invalid_source": "The selected source integration no longer exists.",
       "invalid_zone": "Choose an existing active zone; passive zones are not supported.",
-      "invalid_selection": "Select at least one listed tracker."
+      "invalid_selection": "Select at least one listed tracker.",
+      "preview_modified": "The preview was modified. Leave it unchanged and review the action again.",
+      "confirmation_required": "Check the confirmation box to continue."
     },
     "abort": {
       "rule_unavailable": "The rule is not loaded. Try again after the integration is ready.",

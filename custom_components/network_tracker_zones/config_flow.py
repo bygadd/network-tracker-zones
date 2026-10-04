@@ -22,6 +22,16 @@ def association_label(value: str | None) -> str:
     return "unset (defaults to zone.home)" if value is None else f"{value} (explicit)"
 
 
+def confirmation_schema(preview: str) -> vol.Schema:
+    """Always render the review and require an explicit action to proceed."""
+    return vol.Schema({
+        vol.Required("preview", default=preview): selector.TextSelector(
+            selector.TextSelectorConfig(multiline=True)
+        ),
+        vol.Required("confirm", default=False): selector.BooleanSelector(),
+    })
+
+
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Create one rule per existing source config entry."""
 
@@ -93,7 +103,28 @@ class OptionsFlow(config_entries.OptionsFlow):
         snapshot = getattr(self, "_zone_change_snapshot", None)
         if snapshot is None:
             return self.async_abort(reason="rule_unavailable")
+        preview = f"{self._zone_change_target} ({len(snapshot)})\n" + (
+            "\n".join(snapshot.values()) or "—"
+        )
+        placeholders = {
+            "count": str(len(snapshot)),
+            "target": self._zone_change_target,
+            "trackers": "\n".join(snapshot.values()) or "—",
+        }
+        errors = {}
         if user_input is not None:
+            if user_input.get("preview") != preview:
+                errors["preview"] = "preview_modified"
+            if user_input.get("confirm") is not True:
+                errors["confirm"] = "confirmation_required"
+            if errors:
+                return self.async_show_form(
+                    step_id="confirm_zone_change",
+                    data_schema=confirmation_schema(preview),
+                    errors=errors,
+                    description_placeholders=placeholders,
+                    last_step=True,
+                )
             rule = getattr(self.config_entry, "runtime_data", None)
             if not hasattr(rule, "preview_zone_change") or rule.stopped:
                 return self.async_abort(reason="rule_unavailable")
@@ -109,12 +140,8 @@ class OptionsFlow(config_entries.OptionsFlow):
             )
         return self.async_show_form(
             step_id="confirm_zone_change",
-            data_schema=vol.Schema({}),
-            description_placeholders={
-                "count": str(len(snapshot)),
-                "target": self._zone_change_target,
-                "trackers": "\n".join(snapshot.values()) or "—",
-            },
+            data_schema=confirmation_schema(preview),
+            description_placeholders=placeholders,
             last_step=True,
         )
 
@@ -184,7 +211,28 @@ class OptionsFlow(config_entries.OptionsFlow):
         snapshot = getattr(self, "_audit_snapshot", None)
         if snapshot is None:
             return self.async_abort(reason="rule_unavailable")
+        preview = f"{self._audit_target} ({len(snapshot)})\n" + "\n".join(
+            self._audit_names
+        )
+        placeholders = {
+            "count": str(len(snapshot)),
+            "target": self._audit_target,
+            "trackers": "\n".join(self._audit_names),
+        }
+        errors = {}
         if user_input is not None:
+            if user_input.get("preview") != preview:
+                errors["preview"] = "preview_modified"
+            if user_input.get("confirm") is not True:
+                errors["confirm"] = "confirmation_required"
+            if errors:
+                return self.async_show_form(
+                    step_id="confirm",
+                    data_schema=confirmation_schema(preview),
+                    errors=errors,
+                    description_placeholders=placeholders,
+                    last_step=True,
+                )
             rule = getattr(self.config_entry, "runtime_data", None)
             if not hasattr(rule, "async_replace_mismatches") or rule.stopped:
                 return self.async_abort(reason="rule_unavailable")
@@ -194,11 +242,7 @@ class OptionsFlow(config_entries.OptionsFlow):
             )
         return self.async_show_form(
             step_id="confirm",
-            data_schema=vol.Schema({}),
-            description_placeholders={
-                "count": str(len(snapshot)),
-                "target": self._audit_target,
-                "trackers": "\n".join(self._audit_names),
-            },
+            data_schema=confirmation_schema(preview),
+            description_placeholders=placeholders,
             last_step=True,
         )
