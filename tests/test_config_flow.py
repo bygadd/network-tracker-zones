@@ -4,6 +4,7 @@ from unittest.mock import patch
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.data_entry_flow import InvalidData
+from homeassistant.loader import async_get_integration_descriptions
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.network_tracker_zones import Rule
@@ -12,6 +13,12 @@ from custom_components.network_tracker_zones.const import DOMAIN
 
 async def start(hass):
     return await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+
+
+async def test_listed_in_add_integration_not_helpers(hass):
+    descriptions = await async_get_integration_descriptions(hass)
+    assert DOMAIN in descriptions["custom"]["integration"]
+    assert DOMAIN not in descriptions["custom"]["helper"]
 
 
 async def test_create_and_duplicate(hass, source, zones):
