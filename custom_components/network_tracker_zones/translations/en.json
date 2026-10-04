@@ -1,0 +1,62 @@
+{
+  "title": "Network Tracker Zones",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect a network to a zone",
+        "description": "Select an existing network integration and an active geographic zone. Individual tracker choices are preserved.",
+        "data": {
+          "source_entry_id": "Source integration",
+          "zone": "Zone"
+        }
+      }
+    },
+    "error": {
+      "invalid_source": "Choose an existing UniFi Network or MikroTik Router entry.",
+      "invalid_zone": "Choose an existing active zone; passive zones are not supported."
+    },
+    "abort": {
+      "already_configured": "This source already has a zone rule."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Network Tracker Zones",
+        "menu_options": {
+          "change_zone": "Change target zone",
+          "audit": "Review mismatched trackers"
+        }
+      },
+      "change_zone": {
+        "title": "Change target zone",
+        "description": "Only trackers still managed by this rule will be updated.",
+        "data": {
+          "zone": "Zone"
+        }
+      },
+      "audit": {
+        "title": "Review mismatched tracker zones",
+        "description": "Found {count} trackers whose associated zone differs from {target}. Select all or individual trackers to repair. This review makes no changes.",
+        "data": {
+          "trackers": "Trackers to repair"
+        }
+      },
+      "confirm": {
+        "title": "Apply zone to existing trackers?",
+        "description": "Apply {target} to {count} selected tracker(s)?\n\n{trackers}\n\nTrackers changed since this preview will be skipped."
+      }
+    },
+    "error": {
+      "invalid_source": "The selected source integration no longer exists.",
+      "invalid_zone": "Choose an existing active zone; passive zones are not supported.",
+      "invalid_selection": "Select at least one listed tracker."
+    },
+    "abort": {
+      "rule_unavailable": "The rule is not loaded. Try again after the integration is ready.",
+      "no_trackers": "No eligible client trackers were found for this source. Check that its integration has created client connection trackers.",
+      "no_mismatches": "All eligible trackers already match the target zone.",
+      "repair_complete": "Updated {count} tracker(s)."
+    }
+  }
+}

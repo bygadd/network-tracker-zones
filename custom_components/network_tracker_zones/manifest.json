@@ -1,0 +1,13 @@
+{
+  "domain": "network_tracker_zones",
+  "name": "Network Tracker Zones",
+  "version": "0.1.0",
+  "codeowners": ["@bygadd"],
+  "config_flow": true,
+  "dependencies": ["zone"],
+  "documentation": "https://github.com/bygadd/network-tracker-zones",
+  "issue_tracker": "https://github.com/bygadd/network-tracker-zones/issues",
+  "integration_type": "helper",
+  "iot_class": "local_push",
+  "requirements": []
+}
