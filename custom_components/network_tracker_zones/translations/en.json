@@ -37,17 +37,18 @@
       },
       "confirm_zone_change": {
         "title": "Confirm target zone change",
-        "description": "Change this rule to {target}? {count} managed tracker(s) currently qualify for an update:\n\n{trackers}\n\nPre-existing trackers not claimed by this rule remain unchanged.",
+        "description": "Change this rule to {target}? {count} previously managed tracker(s) qualify. All are selected by default. Clear a tracker to keep its current zone; it will stop following this rule until you select it in a later zone change or explicitly repair it. Pre-existing trackers remain unchanged.",
         "data": {
-          "preview": "Affected trackers (review without editing)",
+          "preview": "No previously managed trackers will change",
+          "trackers": "Trackers to move (clear to exclude)",
           "confirm": "I have reviewed this change and want to apply it"
         }
       },
       "audit": {
         "title": "Review mismatched tracker zones",
-        "description": "Found {count} trackers whose associated zone differs from {target}. Select all or individual trackers to repair. This review makes no changes.",
+        "description": "Found {count} trackers whose associated zone differs from {target}. All are selected by default; clear any that should keep their current zone. This review makes no changes.",
         "data": {
-          "trackers": "Trackers to repair"
+          "trackers": "Trackers to repair (clear to exclude)"
         }
       },
       "confirm": {

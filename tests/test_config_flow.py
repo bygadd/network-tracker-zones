@@ -32,6 +32,7 @@ async def test_custom_translations_include_confirmation_steps(hass):
         assert f"component.{DOMAIN}.options.step.confirm_zone_change.title" in translated
         assert f"component.{DOMAIN}.options.step.confirm.title" in translated
         assert f"component.{DOMAIN}.options.step.confirm_zone_change.data.preview" in translated
+        assert f"component.{DOMAIN}.options.step.confirm_zone_change.data.trackers" in translated
         assert f"component.{DOMAIN}.options.step.confirm_zone_change.data.confirm" in translated
         assert f"component.{DOMAIN}.options.step.confirm.data.preview" in translated
         assert f"component.{DOMAIN}.options.step.confirm.data.confirm" in translated
@@ -102,7 +103,7 @@ async def test_options_merge_and_validation(hass, source, zones):
     assert blocked["errors"] == {"confirm": "confirmation_required"}
     result = await hass.config_entries.options.async_configure(result["flow_id"], {"preview": preview, "confirm": True})
     assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert entry.options == {"zone": "zone.beta", "future_option": True}
+    assert entry.options == {"zone": "zone.beta", "future_option": True, "skipped_tracker_ids": []}
 
 
 async def test_options_audit_and_confirm_repair(hass, source, zones, registry, tracker):
@@ -126,8 +127,11 @@ async def test_options_audit_and_confirm_repair(hass, source, zones, registry, t
     assert audit["description_placeholders"]["count"] == "1"
     assert registry.async_get(mismatched.entity_id).options["device_tracker"]["associated_zone"] == "zone.beta"
 
+    fields = to_field_list(audit["data_schema"], custom_serializer=cv.custom_serializer)
+    assert fields[0]["description"]["suggested_value"] == [mismatched.entity_id]
+    assert fields[0]["selector"]["select"]["mode"] == "list"
     confirm = await hass.config_entries.options.async_configure(
-        audit["flow_id"], {"trackers": ["__all__"]}
+        audit["flow_id"], {"trackers": [mismatched.entity_id]}
     )
     assert confirm["step_id"] == "confirm"
     assert confirm["description_placeholders"]["count"] == "1"
@@ -198,12 +202,12 @@ async def test_target_change_previews_only_managed_trackers(hass, source, zones,
     assert existing.entity_id not in preview["description_placeholders"]["trackers"]
     assert entry.options == {}
 
-    review_text = preview["data_schema"]({})["preview"]
-    assert new.entity_id in review_text
-    assert existing.entity_id not in review_text
-    blocked = await hass.config_entries.options.async_configure(preview["flow_id"], {"preview": "changed", "confirm": True})
-    assert blocked["errors"] == {"preview": "preview_modified"}
-    result = await hass.config_entries.options.async_configure(preview["flow_id"], {"preview": review_text, "confirm": True})
+    fields = to_field_list(preview["data_schema"], custom_serializer=cv.custom_serializer)
+    assert [field["name"] for field in fields] == ["trackers", "confirm"]
+    assert fields[0]["description"]["suggested_value"] == [new.id]
+    assert fields[0]["selector"]["select"]["multiple"] is True
+    assert fields[0]["selector"]["select"]["mode"] == "list"
+    result = await hass.config_entries.options.async_configure(preview["flow_id"], {"trackers": [new.id], "confirm": True})
     assert result["type"] == FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
     assert registry.async_get(existing.entity_id).options == {}
@@ -231,9 +235,114 @@ async def test_target_change_rejects_stale_preview(hass, source, zones, registry
         client.entity_id, "device_tracker", {"associated_zone": "zone.home"}
     )
     await hass.async_block_till_done()
-    result = await hass.config_entries.options.async_configure(preview["flow_id"], {"preview": preview["data_schema"]({})["preview"], "confirm": True})
+    result = await hass.config_entries.options.async_configure(preview["flow_id"], {"trackers": [client.id], "confirm": True})
     assert result["type"] == FlowResultType.ABORT
     assert result["reason"] == "zone_preview_stale"
     assert entry.options == {}
     assert registry.async_get(client.entity_id).options["device_tracker"]["associated_zone"] == "zone.home"
+    await async_unload_entry(hass, entry)
+
+
+async def test_target_change_can_exclude_and_later_reselect_tracker(
+    hass, source, zones, registry, tracker
+):
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={"source_entry_id": source.entry_id, "zone": "zone.alpha"}
+    )
+    entry.add_to_hass(hass)
+    await async_setup_entry(hass, entry)
+    move = tracker()
+    keep = tracker("02:00:00:00:00:02")
+    await hass.async_block_till_done()
+
+    menu = await hass.config_entries.options.async_init(entry.entry_id)
+    form = await hass.config_entries.options.async_configure(
+        menu["flow_id"], {"next_step_id": "change_zone"}
+    )
+    review = await hass.config_entries.options.async_configure(
+        form["flow_id"], {"zone": "zone.beta"}
+    )
+    fields = to_field_list(review["data_schema"], custom_serializer=cv.custom_serializer)
+    assert set(fields[0]["description"]["suggested_value"]) == {move.id, keep.id}
+    await hass.config_entries.options.async_configure(
+        review["flow_id"], {"trackers": [move.id], "confirm": True}
+    )
+    await hass.async_block_till_done()
+    assert registry.async_get(move.entity_id).options["device_tracker"]["associated_zone"] == "zone.beta"
+    assert registry.async_get(keep.entity_id).options["device_tracker"]["associated_zone"] == "zone.alpha"
+    assert entry.options["skipped_tracker_ids"] == [keep.id]
+
+    await async_unload_entry(hass, entry)
+    await async_setup_entry(hass, entry)
+    await entry.runtime_data.async_scan()
+    assert registry.async_get(keep.entity_id).options["device_tracker"]["associated_zone"] == "zone.alpha"
+
+    hass.states.async_set("zone.gamma", "0", {"passive": False})
+    menu = await hass.config_entries.options.async_init(entry.entry_id)
+    form = await hass.config_entries.options.async_configure(
+        menu["flow_id"], {"next_step_id": "change_zone"}
+    )
+    review = await hass.config_entries.options.async_configure(
+        form["flow_id"], {"zone": "zone.gamma"}
+    )
+    fields = to_field_list(review["data_schema"], custom_serializer=cv.custom_serializer)
+    assert set(fields[0]["description"]["suggested_value"]) == {move.id, keep.id}
+    await hass.config_entries.options.async_configure(
+        review["flow_id"], {"trackers": [move.id, keep.id], "confirm": True}
+    )
+    await hass.async_block_till_done()
+    assert registry.async_get(move.entity_id).options["device_tracker"]["associated_zone"] == "zone.gamma"
+    assert registry.async_get(keep.entity_id).options["device_tracker"]["associated_zone"] == "zone.gamma"
+    assert entry.options["skipped_tracker_ids"] == []
+    await async_unload_entry(hass, entry)
+
+
+async def test_audit_repair_reenables_skipped_tracker(hass, source, zones, registry, tracker):
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={"source_entry_id": source.entry_id, "zone": "zone.alpha"}
+    )
+    entry.add_to_hass(hass)
+    await async_setup_entry(hass, entry)
+    client = tracker()
+    await hass.async_block_till_done()
+    hass.config_entries.async_update_entry(
+        entry, options={"zone": "zone.beta", "skipped_tracker_ids": [client.id]}
+    )
+    await hass.async_block_till_done()
+    assert registry.async_get(client.entity_id).options["device_tracker"]["associated_zone"] == "zone.alpha"
+    assert await entry.runtime_data.async_replace_mismatches(
+        "zone.beta", {client.id: "zone.alpha"}
+    ) == 1
+    await hass.async_block_till_done()
+    assert registry.async_get(client.entity_id).options["device_tracker"]["associated_zone"] == "zone.beta"
+    assert entry.options["skipped_tracker_ids"] == []
+    await async_unload_entry(hass, entry)
+
+
+async def test_target_change_with_all_trackers_cleared_only_affects_future_clients(
+    hass, source, zones, registry, tracker
+):
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={"source_entry_id": source.entry_id, "zone": "zone.alpha"}
+    )
+    entry.add_to_hass(hass)
+    await async_setup_entry(hass, entry)
+    existing = tracker()
+    await hass.async_block_till_done()
+    menu = await hass.config_entries.options.async_init(entry.entry_id)
+    form = await hass.config_entries.options.async_configure(
+        menu["flow_id"], {"next_step_id": "change_zone"}
+    )
+    review = await hass.config_entries.options.async_configure(
+        form["flow_id"], {"zone": "zone.beta"}
+    )
+    await hass.config_entries.options.async_configure(
+        review["flow_id"], {"trackers": [], "confirm": True}
+    )
+    await hass.async_block_till_done()
+    assert registry.async_get(existing.entity_id).options["device_tracker"]["associated_zone"] == "zone.alpha"
+    assert entry.options["skipped_tracker_ids"] == [existing.id]
+    future = tracker("02:00:00:00:00:02")
+    await hass.async_block_till_done()
+    assert registry.async_get(future.entity_id).options["device_tracker"]["associated_zone"] == "zone.beta"
     await async_unload_entry(hass, entry)

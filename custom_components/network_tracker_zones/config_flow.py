@@ -8,7 +8,7 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from . import valid_source, valid_zone
-from .const import CONF_SOURCE, CONF_ZONE, DOMAIN, SOURCES
+from .const import CONF_SKIPPED, CONF_SOURCE, CONF_ZONE, DOMAIN, SOURCES
 
 
 def zone_schema(default=vol.UNDEFINED):
@@ -30,6 +30,33 @@ def confirmation_schema(preview: str) -> vol.Schema:
         ),
         vol.Required("confirm", default=False): selector.BooleanSelector(),
     })
+
+
+def zone_change_schema(
+    snapshot: dict[str, str], target: str, selected: list[str] | None = None
+) -> vol.Schema:
+    """Show every affected tracker as a preselected, independently removable choice."""
+    fields = {}
+    if snapshot:
+        fields[vol.Optional(
+            "trackers",
+            description={"suggested_value": list(snapshot) if selected is None else selected},
+        )] = selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[
+                    selector.SelectOptionDict(value=registry_id, label=label)
+                    for registry_id, label in snapshot.items()
+                ],
+                multiple=True,
+                mode=selector.SelectSelectorMode.LIST,
+            )
+        )
+    else:
+        fields[vol.Required("preview", default=f"{target} (0)\n—")] = selector.TextSelector(
+            selector.TextSelectorConfig(multiline=True)
+        )
+    fields[vol.Required("confirm", default=False)] = selector.BooleanSelector()
+    return vol.Schema(fields)
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -103,24 +130,28 @@ class OptionsFlow(config_entries.OptionsFlow):
         snapshot = getattr(self, "_zone_change_snapshot", None)
         if snapshot is None:
             return self.async_abort(reason="rule_unavailable")
-        preview = f"{self._zone_change_target} ({len(snapshot)})\n" + (
-            "\n".join(snapshot.values()) or "—"
-        )
         placeholders = {
             "count": str(len(snapshot)),
             "target": self._zone_change_target,
             "trackers": "\n".join(snapshot.values()) or "—",
         }
         errors = {}
+        selected = None
         if user_input is not None:
-            if user_input.get("preview") != preview:
+            selected = user_input.get("trackers", [])
+            if snapshot and (
+                not isinstance(selected, list)
+                or any(registry_id not in snapshot for registry_id in selected)
+            ):
+                errors["trackers"] = "invalid_selection"
+            if not snapshot and user_input.get("preview") != f"{self._zone_change_target} (0)\n—":
                 errors["preview"] = "preview_modified"
             if user_input.get("confirm") is not True:
                 errors["confirm"] = "confirmation_required"
             if errors:
                 return self.async_show_form(
                     step_id="confirm_zone_change",
-                    data_schema=confirmation_schema(preview),
+                    data_schema=zone_change_schema(snapshot, self._zone_change_target, selected),
                     errors=errors,
                     description_placeholders=placeholders,
                     last_step=True,
@@ -135,12 +166,20 @@ class OptionsFlow(config_entries.OptionsFlow):
                 or rule.preview_zone_change(self._zone_change_target) != snapshot
             ):
                 return self.async_abort(reason="zone_preview_stale")
+            skipped = set(self.config_entry.options.get(CONF_SKIPPED, []))
+            skipped.difference_update(selected)
+            skipped.update(set(snapshot) - set(selected))
             return self.async_create_entry(
-                title="", data={**self.config_entry.options, CONF_ZONE: self._zone_change_target}
+                title="",
+                data={
+                    **self.config_entry.options,
+                    CONF_ZONE: self._zone_change_target,
+                    CONF_SKIPPED: sorted(skipped),
+                },
             )
         return self.async_show_form(
             step_id="confirm_zone_change",
-            data_schema=confirmation_schema(preview),
+            data_schema=zone_change_schema(snapshot, self._zone_change_target),
             description_placeholders=placeholders,
             last_step=True,
         )
@@ -164,10 +203,9 @@ class OptionsFlow(config_entries.OptionsFlow):
 
         by_entity_id = {item["entity_id"]: item for item in mismatches}
         errors = {}
+        selected = None
         if user_input is not None:
             selected = user_input.get("trackers", [])
-            if "__all__" in selected:
-                selected = list(by_entity_id)
             if not selected or any(entity_id not in by_entity_id for entity_id in selected):
                 errors["trackers"] = "invalid_selection"
             else:
@@ -181,23 +219,23 @@ class OptionsFlow(config_entries.OptionsFlow):
 
         options = [
             selector.SelectOptionDict(
-                value="__all__", label=f"All {len(mismatches)} mismatches"
-            )
-        ]
-        options.extend(
-            selector.SelectOptionDict(
                 value=item["entity_id"],
                 label=f'{item["entity_id"]}: {association_label(item["current"])} → {target}',
             )
             for item in mismatches
-        )
+        ]
         return self.async_show_form(
             step_id="audit",
             data_schema=vol.Schema({
-                vol.Required("trackers"): selector.SelectSelector(
+                vol.Optional(
+                    "trackers",
+                    description={
+                        "suggested_value": list(by_entity_id) if selected is None else selected
+                    },
+                ): selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=options,
-                        mode=selector.SelectSelectorMode.DROPDOWN,
+                        mode=selector.SelectSelectorMode.LIST,
                         multiple=True,
                     )
                 )

@@ -14,7 +14,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 
-from .const import CONF_SOURCE, CONF_ZONE, DOMAIN, SOURCES
+from .const import CONF_SKIPPED, CONF_SOURCE, CONF_ZONE, DOMAIN, SOURCES
 
 _LOGGER = logging.getLogger(__name__)
 _MAC = r"[0-9a-f]{2}(?::[0-9a-f]{2}){5}"
@@ -178,6 +178,7 @@ class Rule:
     ) -> int:
         """Explicitly replace previewed values that have not changed since review."""
         changed = 0
+        changed_ids: set[str] = set()
         async with self.lock:
             if self.stopped:
                 return 0
@@ -222,6 +223,17 @@ class Rule:
                     await self.async_save()
                     raise
                 changed += 1
+                changed_ids.add(registry_id)
+            if changed_ids:
+                skipped = set(self.entry.options.get(CONF_SKIPPED, []))
+                if skipped.intersection(changed_ids):
+                    self.hass.config_entries.async_update_entry(
+                        self.entry,
+                        options={
+                            **self.entry.options,
+                            CONF_SKIPPED: sorted(skipped - changed_ids),
+                        },
+                    )
         return changed
 
     def _restore_ownership(
@@ -260,7 +272,11 @@ class Rule:
             or not valid_zone(self.hass, target)
         ):
             return
-        if entity.id in self.excluded or entity.id in self.preexisting:
+        if (
+            entity.id in self.excluded
+            or entity.id in self.preexisting
+            or entity.id in self.entry.options.get(CONF_SKIPPED, [])
+        ):
             return
         current = entity.options.get("device_tracker", {}).get("associated_zone")
         previous = self.managed.get(entity.id)
