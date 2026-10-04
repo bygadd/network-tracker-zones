@@ -5,9 +5,10 @@ from homeassistant.config_entries import SOURCE_USER
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.data_entry_flow import InvalidData
 from homeassistant.loader import async_get_integration_descriptions
+from homeassistant.helpers.translation import async_get_translations
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.network_tracker_zones import Rule
+from custom_components.network_tracker_zones import Rule, async_setup_entry, async_unload_entry
 from custom_components.network_tracker_zones.const import DOMAIN
 
 
@@ -19,6 +20,15 @@ async def test_listed_in_add_integration_not_helpers(hass):
     descriptions = await async_get_integration_descriptions(hass)
     assert DOMAIN in descriptions["custom"]["integration"]
     assert DOMAIN not in descriptions["custom"]["helper"]
+
+
+async def test_custom_translations_include_confirmation_steps(hass):
+    for language in ("en", "bg"):
+        translated = await async_get_translations(
+            hass, language, "options", integrations={DOMAIN}
+        )
+        assert f"component.{DOMAIN}.options.step.confirm_zone_change.title" in translated
+        assert f"component.{DOMAIN}.options.step.confirm.title" in translated
 
 
 async def test_create_and_duplicate(hass, source, zones):
@@ -64,6 +74,7 @@ async def test_invalid_selections(hass, source, zones, source_kind, zone, error)
 async def test_options_merge_and_validation(hass, source, zones):
     entry = MockConfigEntry(domain=DOMAIN, data={"source_entry_id": source.entry_id, "zone": "zone.alpha"}, options={"future_option": True})
     entry.add_to_hass(hass)
+    entry.runtime_data = Rule(hass, entry, source)
     menu = await hass.config_entries.options.async_init(entry.entry_id)
     assert menu["type"] == FlowResultType.MENU
     form = await hass.config_entries.options.async_configure(
@@ -72,6 +83,9 @@ async def test_options_merge_and_validation(hass, source, zones):
     result = await hass.config_entries.options.async_configure(form["flow_id"], {"zone": "zone.missing"})
     assert result["errors"] == {"zone": "invalid_zone"}
     result = await hass.config_entries.options.async_configure(form["flow_id"], {"zone": "zone.beta"})
+    assert result["step_id"] == "confirm_zone_change"
+    assert result["description_placeholders"]["count"] == "0"
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert entry.options == {"zone": "zone.beta", "future_option": True}
 
@@ -139,3 +153,64 @@ async def test_options_audit_reports_when_source_has_no_trackers(hass, source, z
     )
     assert result["type"] == FlowResultType.ABORT
     assert result["reason"] == "no_trackers"
+
+
+async def test_target_change_previews_only_managed_trackers(hass, source, zones, registry, tracker):
+    existing = tracker()
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={"source_entry_id": source.entry_id, "zone": "zone.alpha"}
+    )
+    entry.add_to_hass(hass)
+    await async_setup_entry(hass, entry)
+    new = tracker("02:00:00:00:00:02")
+    await hass.async_block_till_done()
+    assert registry.async_get(existing.entity_id).options == {}
+    assert registry.async_get(new.entity_id).options["device_tracker"]["associated_zone"] == "zone.alpha"
+
+    menu = await hass.config_entries.options.async_init(entry.entry_id)
+    form = await hass.config_entries.options.async_configure(
+        menu["flow_id"], {"next_step_id": "change_zone"}
+    )
+    preview = await hass.config_entries.options.async_configure(
+        form["flow_id"], {"zone": "zone.beta"}
+    )
+    assert preview["step_id"] == "confirm_zone_change"
+    assert preview["description_placeholders"]["count"] == "1"
+    assert new.entity_id in preview["description_placeholders"]["trackers"]
+    assert existing.entity_id not in preview["description_placeholders"]["trackers"]
+    assert entry.options == {}
+
+    result = await hass.config_entries.options.async_configure(preview["flow_id"], {})
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    assert registry.async_get(existing.entity_id).options == {}
+    assert registry.async_get(new.entity_id).options["device_tracker"]["associated_zone"] == "zone.beta"
+    await async_unload_entry(hass, entry)
+
+
+async def test_target_change_rejects_stale_preview(hass, source, zones, registry, tracker):
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={"source_entry_id": source.entry_id, "zone": "zone.alpha"}
+    )
+    entry.add_to_hass(hass)
+    await async_setup_entry(hass, entry)
+    client = tracker()
+    await hass.async_block_till_done()
+    menu = await hass.config_entries.options.async_init(entry.entry_id)
+    form = await hass.config_entries.options.async_configure(
+        menu["flow_id"], {"next_step_id": "change_zone"}
+    )
+    preview = await hass.config_entries.options.async_configure(
+        form["flow_id"], {"zone": "zone.beta"}
+    )
+
+    registry.async_update_entity_options(
+        client.entity_id, "device_tracker", {"associated_zone": "zone.home"}
+    )
+    await hass.async_block_till_done()
+    result = await hass.config_entries.options.async_configure(preview["flow_id"], {})
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "zone_preview_stale"
+    assert entry.options == {}
+    assert registry.async_get(client.entity_id).options["device_tracker"]["associated_zone"] == "zone.home"
+    await async_unload_entry(hass, entry)

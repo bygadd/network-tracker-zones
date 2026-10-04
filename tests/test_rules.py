@@ -23,12 +23,61 @@ async def test_initial_future_and_capability_late(hass, source, zones, registry,
     late = registry.async_get_or_create("device_tracker", "unifi", "site_alpha-02:00:00:00:00:02", config_entry=source)
     entry = rule(hass, source)
     await async_setup_entry(hass, entry)
-    assert association(registry, first) == "zone.alpha"
+    assert association(registry, first) is None
     assert association(registry, late) is None
     future = tracker("02:00:00:00:00:03")
     registry.async_update_entity(late.entity_id, capabilities={"tracking_type": "connection"})
     await hass.async_block_till_done()
-    assert association(registry, future) == association(registry, late) == "zone.alpha"
+    assert association(registry, future) == "zone.alpha"
+    assert association(registry, late) is None
+    assert {first.id, late.id} <= entry.runtime_data.preexisting
+    await async_unload_entry(hass, entry)
+
+
+async def test_existing_unset_requires_explicit_repair_even_after_restart(hass, source, zones, registry, tracker):
+    client = tracker()
+    entry = rule(hass, source)
+    await async_setup_entry(hass, entry)
+    assert association(registry, client) is None
+    assert client.id in entry.runtime_data.preexisting
+    await async_unload_entry(hass, entry)
+
+    await async_setup_entry(hass, entry)
+    assert association(registry, client) is None
+    preview = entry.runtime_data.audit("zone.alpha")[0]
+    assert preview["current"] is None
+    assert await entry.runtime_data.async_replace_mismatches(
+        "zone.alpha", {client.id: None}
+    ) == 1
+    assert client.id not in entry.runtime_data.preexisting
+    assert association(registry, client) == "zone.alpha"
+    await async_unload_entry(hass, entry)
+
+
+async def test_upgrade_preserves_old_managed_ids_and_protects_other_existing(
+    hass, source, zones, registry, tracker
+):
+    import json
+    from pathlib import Path
+
+    old_managed = tracker()
+    untouched = tracker("02:00:00:00:00:02")
+    registry.async_update_entity_options(
+        old_managed.entity_id, "device_tracker", {"associated_zone": "zone.alpha"}
+    )
+    entry = rule(hass, source)
+    previous = Rule(hass, entry, source)
+    previous.managed[old_managed.id] = "zone.alpha"
+    await previous.async_save()
+    path = Path(previous.store.path)
+    data = json.loads(await hass.async_add_executor_job(path.read_text))
+    del data["data"]["preexisting"]  # Stored by versions 0.1.0 and 0.1.1.
+    await hass.async_add_executor_job(path.write_text, json.dumps(data))
+
+    await async_setup_entry(hass, entry)
+    assert entry.runtime_data.managed[old_managed.id] == "zone.alpha"
+    assert untouched.id in entry.runtime_data.preexisting
+    assert association(registry, untouched) is None
     await async_unload_entry(hass, entry)
 
 
@@ -59,12 +108,13 @@ async def test_manual_choice_survives_restart_and_target_change(hass, source, zo
 
 
 async def test_change_updates_managed_only_and_merges_options(hass, source, zones, registry, tracker):
-    managed, manual = tracker(), tracker("02:00:00:00:00:02")
-    registry.async_update_entity_options(managed.entity_id, "device_tracker", {"consider_home": 10})
-    registry.async_update_entity_options(managed.entity_id, "sensor", {"display_precision": 2})
+    manual = tracker("02:00:00:00:00:02")
+    registry.async_update_entity_options(manual.entity_id, "device_tracker", {"associated_zone": "zone.home"})
     entry = rule(hass, source)
     await async_setup_entry(hass, entry)
-    registry.async_update_entity_options(manual.entity_id, "device_tracker", {"associated_zone": "zone.home"})
+    managed = tracker()
+    registry.async_update_entity_options(managed.entity_id, "device_tracker", {"consider_home": 10})
+    registry.async_update_entity_options(managed.entity_id, "sensor", {"display_precision": 2})
     await hass.async_block_till_done()
     hass.config_entries.async_update_entry(entry, options={"zone": "zone.beta"})
     await entry.runtime_data.async_scan()
@@ -75,14 +125,14 @@ async def test_change_updates_managed_only_and_merges_options(hass, source, zone
 
 
 async def test_exact_sources_independent_same_mac(hass, source, zones, registry, tracker):
-    first = tracker()
     second = MockConfigEntry(domain="unifi", title="Other network", data={"site": "site_beta"})
     second.add_to_hass(hass)
-    other = registry.async_get_or_create("device_tracker", "unifi", "site_beta-02:00:00:00:00:01", config_entry=second, capabilities={"tracking_type": "connection"})
     a, b = rule(hass, source), rule(hass, second, "zone.beta")
     await async_setup_entry(hass, a)
-    assert association(registry, other) is None
     await async_setup_entry(hass, b)
+    first = tracker()
+    other = registry.async_get_or_create("device_tracker", "unifi", "site_beta-02:00:00:00:00:01", config_entry=second, capabilities={"tracking_type": "connection"})
+    await hass.async_block_till_done()
     assert association(registry, first) == "zone.alpha"
     assert association(registry, other) == "zone.beta"
     await async_unload_entry(hass, a)
@@ -107,10 +157,11 @@ async def test_non_clients_excluded(hass, source, zones, registry, platform, uid
 async def test_mikrotik_client_identity(hass, zones, registry):
     source = MockConfigEntry(domain="mikrotik_router", title="Example router", data={"name": "Example Router"})
     source.add_to_hass(hass)
-    client = registry.async_get_or_create("device_tracker", "mikrotik_router", "example router-host-02_00_00_00_00_01", config_entry=source, capabilities={"tracking_type": "connection"})
-    infrastructure = registry.async_get_or_create("device_tracker", "mikrotik_router", "example router-router", config_entry=source, capabilities={"tracking_type": "connection"})
     entry = rule(hass, source)
     await async_setup_entry(hass, entry)
+    client = registry.async_get_or_create("device_tracker", "mikrotik_router", "example router-host-02_00_00_00_00_01", config_entry=source, capabilities={"tracking_type": "connection"})
+    infrastructure = registry.async_get_or_create("device_tracker", "mikrotik_router", "example router-router", config_entry=source, capabilities={"tracking_type": "connection"})
+    await hass.async_block_till_done()
     assert association(registry, client) == "zone.alpha"
     assert association(registry, infrastructure) is None
     await async_unload_entry(hass, entry)
@@ -124,7 +175,10 @@ async def test_unload_and_reload_listener(hass, source, zones, registry, tracker
     await hass.async_block_till_done()
     assert association(registry, entity) is None
     await async_setup_entry(hass, entry)
-    assert association(registry, entity) == "zone.alpha"
+    assert association(registry, entity) is None
+    later = tracker("02:00:00:00:00:02")
+    await hass.async_block_till_done()
+    assert association(registry, later) == "zone.alpha"
     await async_unload_entry(hass, entry)
 
 
@@ -188,6 +242,12 @@ async def test_native_scanner_state_and_disconnect(hass, source, zones, registry
     assert hass.states.get(scanner.entity_id).state == "home"
     entry = rule(hass, source)
     await async_setup_entry(hass, entry)
+    await hass.async_block_till_done()
+    assert hass.states.get(scanner.entity_id).state == "home"
+    preview = entry.runtime_data.audit("zone.alpha")[0]
+    assert await entry.runtime_data.async_replace_mismatches(
+        "zone.alpha", {preview["registry_id"]: preview["current"]}
+    ) == 1
     await hass.async_block_till_done()
     assert hass.states.get(scanner.entity_id).state == "Alpha"
     scanner.connected = False
@@ -298,9 +358,10 @@ async def test_repair_skips_stale_preview_and_target(hass, source, zones, regist
 
 async def test_unset_association_is_effectively_home(hass, source, zones, registry, tracker):
     hass.states.async_set("zone.home", "0", {"passive": False})
-    client = tracker()
     entry = rule(hass, source)
     await async_setup_entry(hass, entry)
+    client = tracker()
+    await hass.async_block_till_done()
 
     # Clearing a managed value is a manual choice; audit keeps the raw None
     # for stale-preview protection, while comparing with HA's effective home.

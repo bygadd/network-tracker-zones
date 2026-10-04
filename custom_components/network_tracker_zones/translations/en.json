@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "Connect a network to a zone",
-        "description": "Select an existing network integration and an active geographic zone. Individual tracker choices are preserved.",
+        "description": "Select an existing network integration and an active geographic zone. Setup leaves existing trackers unchanged; eligible new client trackers receive this zone.",
         "data": {
           "source_entry_id": "Source integration",
           "zone": "Zone"
@@ -30,10 +30,14 @@
       },
       "change_zone": {
         "title": "Change target zone",
-        "description": "Only trackers still managed by this rule will be updated.",
+        "description": "Choose the new zone. The next screen previews every currently managed tracker that would change; nothing is written yet.",
         "data": {
           "zone": "Zone"
         }
+      },
+      "confirm_zone_change": {
+        "title": "Confirm target zone change",
+        "description": "Change this rule to {target}? {count} managed tracker(s) currently qualify for an update:\n\n{trackers}\n\nPre-existing trackers not claimed by this rule remain unchanged."
       },
       "audit": {
         "title": "Review mismatched tracker zones",
@@ -54,6 +58,8 @@
     },
     "abort": {
       "rule_unavailable": "The rule is not loaded. Try again after the integration is ready.",
+      "zone_unchanged": "The selected zone is already the rule's target.",
+      "zone_preview_stale": "The rule or its trackers changed after the preview. Review the zone change again.",
       "no_trackers": "No eligible client trackers were found for this source. Check that its integration has created client connection trackers.",
       "no_mismatches": "All eligible trackers already match the target zone.",
       "repair_complete": "Updated {count} tracker(s)."

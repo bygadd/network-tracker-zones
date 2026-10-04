@@ -17,6 +17,11 @@ def zone_schema(default=vol.UNDEFINED):
     )
 
 
+def association_label(value: str | None) -> str:
+    """Describe registry presence without claiming to know who set a value."""
+    return "unset (defaults to zone.home)" if value is None else f"{value} (explicit)"
+
+
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Create one rule per existing source config entry."""
 
@@ -67,9 +72,51 @@ class OptionsFlow(config_entries.OptionsFlow):
             elif not valid_zone(self.hass, user_input[CONF_ZONE]):
                 errors[CONF_ZONE] = "invalid_zone"
             else:
-                return self.async_create_entry(title="", data={**self.config_entry.options, **user_input})
+                rule = getattr(self.config_entry, "runtime_data", None)
+                if not hasattr(rule, "preview_zone_change") or rule.stopped:
+                    return self.async_abort(reason="rule_unavailable")
+                self._zone_change_original = self.config_entry.options.get(
+                    CONF_ZONE, self.config_entry.data[CONF_ZONE]
+                )
+                self._zone_change_target = user_input[CONF_ZONE]
+                if self._zone_change_target == self._zone_change_original:
+                    return self.async_abort(reason="zone_unchanged")
+                self._zone_change_snapshot = rule.preview_zone_change(
+                    self._zone_change_target
+                )
+                return await self.async_step_confirm_zone_change()
         zone_key, zone_value = zone_schema(self.config_entry.options.get(CONF_ZONE, self.config_entry.data[CONF_ZONE]))
         return self.async_show_form(step_id="change_zone", data_schema=vol.Schema({zone_key: zone_value}), errors=errors)
+
+    async def async_step_confirm_zone_change(self, user_input=None):
+        """Show the exact managed trackers affected before changing a rule."""
+        snapshot = getattr(self, "_zone_change_snapshot", None)
+        if snapshot is None:
+            return self.async_abort(reason="rule_unavailable")
+        if user_input is not None:
+            rule = getattr(self.config_entry, "runtime_data", None)
+            if not hasattr(rule, "preview_zone_change") or rule.stopped:
+                return self.async_abort(reason="rule_unavailable")
+            if (
+                self.config_entry.options.get(CONF_ZONE, self.config_entry.data[CONF_ZONE])
+                != self._zone_change_original
+                or not valid_zone(self.hass, self._zone_change_target)
+                or rule.preview_zone_change(self._zone_change_target) != snapshot
+            ):
+                return self.async_abort(reason="zone_preview_stale")
+            return self.async_create_entry(
+                title="", data={**self.config_entry.options, CONF_ZONE: self._zone_change_target}
+            )
+        return self.async_show_form(
+            step_id="confirm_zone_change",
+            data_schema=vol.Schema({}),
+            description_placeholders={
+                "count": str(len(snapshot)),
+                "target": self._zone_change_target,
+                "trackers": "\n".join(snapshot.values()) or "—",
+            },
+            last_step=True,
+        )
 
     async def async_step_audit(self, user_input=None):
         """Show exact source-scoped mismatches and let the user select repairs."""
@@ -77,6 +124,11 @@ class OptionsFlow(config_entries.OptionsFlow):
         if not hasattr(rule, "audit") or rule.stopped:
             return self.async_abort(reason="rule_unavailable")
         target = self.config_entry.options.get(CONF_ZONE, self.config_entry.data[CONF_ZONE])
+        if (
+            valid_source(self.hass, self.config_entry.data[CONF_SOURCE]) is not rule.source
+            or not valid_zone(self.hass, target)
+        ):
+            return self.async_abort(reason="rule_unavailable")
         mismatches = rule.audit(target)
         if not mismatches:
             return self.async_abort(
@@ -102,13 +154,13 @@ class OptionsFlow(config_entries.OptionsFlow):
 
         options = [
             selector.SelectOptionDict(
-                value="__all__", label=f"Всички {len(mismatches)} несъответствия"
+                value="__all__", label=f"All {len(mismatches)} mismatches"
             )
         ]
         options.extend(
             selector.SelectOptionDict(
                 value=item["entity_id"],
-                label=f'{item["entity_id"]}: {item["current"] or "zone.home (по подразбиране)"} → {target}',
+                label=f'{item["entity_id"]}: {association_label(item["current"])} → {target}',
             )
             for item in mismatches
         )

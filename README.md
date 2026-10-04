@@ -1,36 +1,46 @@
 # Network Tracker Zones
 
-Свързва клиентските `device_tracker` ентитита от **UniFi Network** и **MikroTik Router** с правилната зона в Home Assistant. Използва съществуващите интеграции и техните тракери; не изисква допълнителни акаунти или търсене на ID в логове.
+Network Tracker Zones assigns Home Assistant's native **Associated zone** option to connection-based `device_tracker` entities from an existing UniFi Network or MikroTik Router integration. Each rule maps one source integration entry to one geographic `zone.*`. The source integration continues to determine whether a client is connected; this component changes only where Home Assistant places a connected client.
 
-## Настройка след инсталиране през HACS
+It does not create trackers, poll network devices, modify source credentials, define zones, or change `person` configuration.
 
-**HACS само изтегля интеграцията. Екранът за конфигурация е в Home Assistant, не в HACS.**
+## Installation and configuration
 
-1. След изтеглянето рестартирай **Home Assistant**.
-2. Отвори **Settings → Devices & services → Integrations → Add integration** и потърси **Network Tracker Zones**. Можеш и да използваш [директния бутон за добавяне](https://my.home-assistant.io/redirect/config_flow_start/?domain=network_tracker_zones).
-3. Избери вече добавен **UniFi Network** хъб или **MikroTik Router** от списъка **Източник** и неговата географска **Зона**. Натисни **Submit**.
-4. Повтори **Add integration → Network Tracker Zones** за всеки следващ хъб/рутер. Всеки източник има собствено правило и зона.
+1. In **HACS → ⋮ → Custom repositories**, add `https://github.com/bygadd/network-tracker-zones` as an **Integration** and download it.
+2. Restart Home Assistant. HACS installs the files; configuration is performed in Home Assistant under **Settings → Devices & services → Integrations → Add integration → Network Tracker Zones**. You can also use the [direct setup link](https://my.home-assistant.io/redirect/config_flow_start/?domain=network_tracker_zones).
+3. Select an existing UniFi Network or MikroTik Router source and an active geographic zone. Add a separate rule for each source entry. A source can have only one rule.
 
-Ако интеграцията не излиза в **Add integration**, провери дали в HACS статусът е **Downloaded**, рестартирай Home Assistant и обнови страницата на браузъра. Ако няма източници в списъка, първо добави съответните UniFi Network/MikroTik Router интеграции. Ако няма желаната зона, създай я в **Settings → Areas, labels & zones → Zones**.
+If the integration is absent from **Add integration**, verify that HACS reports it as downloaded and restart Home Assistant. The source and zone selectors are populated from existing Home Assistant entries; no controller IDs or credentials are entered here.
 
-## Проверка и корекция на вече добавени тракери
+## Exact behavior
 
-Отвори **Settings → Devices & services → Network Tracker Zones** и натисни **Configure** на правилото за конкретния източник. Избери **Провери несъответствията**. Ще видиш тракерите, чиято текуща асоциирана зона е различна от избраната за този хъб. Избери **всички** или само определени тракери и потвърди на следващия екран. Прегледът сам по себе си не променя нищо.
+The integration matches only client connection trackers belonging to the selected source `config_entry_id`. It checks the tracker platform, `tracking_type: connection`, and the client unique-ID format used by the supported source. Infrastructure and position trackers are ignored. Each rule stores its own managed and protected registry IDs in Home Assistant's local storage.
 
-Новите клиентски тракери получават зоната автоматично. Съществуващите ръчно зададени зони се запазват, докато не избереш изрично корекция. След корекция тракерът се управлява от правилото; ако по-късно смениш зоната на правилото, тя ще се актуализира и на този тракер. Нова ръчна промяна на тракера отново има предимство.
+| Tracker state | Action |
+| --- | --- |
+| Already registered and not previously managed by this rule, with no Associated zone value | Leave unchanged. Home Assistant uses `zone.home` as the effective default. The tracker is available for an explicit audit and repair. |
+| Already registered and not previously managed, with an explicit Associated zone, including `zone.home` | Leave unchanged, even if it differs from or equals the rule target. |
+| Registered while the rule is active, eligible, and without an Associated zone value | Assign the rule's target zone automatically and record that this rule wrote it. |
+| Newly registered with an explicit Associated zone | Preserve the explicit value. |
+| Previously assigned by this rule, then changed to a different value or cleared | Preserve the new value and stop managing that tracker. |
+| An unmanaged source tracker appears while the rule is unloaded | Treat it as pre-existing at the next start; it requires explicit review. |
 
-Ако проверката съобщи **няма подходящи клиентски тракери**, избраният източник още не е създал разпознати тракери. Съобщението **няма несъответствия** означава, че намерените клиентски тракери вече са в правилната зона.
+The integration reads the current `device_tracker.associated_zone` option. A missing or null value uses [Home Assistant's documented default](https://www.home-assistant.io/integrations/device_tracker/#connection-trackers), `zone.home`; an explicit `zone.home` string has the same effective Home state without relying on that default. **The registry does not record who set an existing value.** The integration identifies its own writes from its local managed-ID record. A later different or cleared value is treated as an external edit. It cannot identify an older value's author or detect an edit that writes the same value again.
 
-## Ограничения
+## Review existing trackers
 
-Поддържат се UniFi Network (`unifi`) и MikroTik Router (`mikrotik_router`). UniFi AP Direct и вградената MikroTik интеграция са извън обхвата. Интеграцията не създава нови тракери и не възстановява ентити, изгубено поради конфликт на идентификатор в източника. При премахване на правило вече записаните асоциирани зони остават на тракерите.
+Open **Settings → Devices & services → Network Tracker Zones → Configure** on the rule for the relevant source, then choose **Review mismatched trackers**. The preview lists eligible trackers whose effective current zone differs from the rule target. A missing or null value is displayed as **unset (defaults to zone.home)**; a zone string is displayed as **explicit**. Select individual trackers or **All**, then confirm on the following screen. Opening the preview does not change any tracker.
 
-Кодът е проверен с Home Assistant Core **2026.9.4**. Ако настройката не се отваря след рестарт, виж **Settings → System → Logs** за `network_tracker_zones` и отвори [issue](https://github.com/bygadd/network-tracker-zones/issues) с текста на грешката.
+At confirmation, the integration rechecks the source, tracker identity, target zone, and current option. It skips entries changed since the preview. Only `device_tracker.associated_zone` is written; other options are preserved. A repaired tracker becomes managed by the rule. To preserve a later individual choice, change or clear its Associated zone manually.
 
----
+To change a rule's target, choose **Configure → Change target zone**. A separate confirmation screen lists the currently managed trackers that would change. Trackers protected as pre-existing or released after an external edit remain unchanged. Newly registered clients subsequently use the new target.
 
-## English
+## Upgrading from 0.1.0 or 0.1.1
 
-HACS downloads the integration but does not configure it. After downloading, **restart Home Assistant**, then open **Settings → Devices & services → Integrations → Add integration → Network Tracker Zones**, or use the [direct setup link](https://my.home-assistant.io/redirect/config_flow_start/?domain=network_tracker_zones). Select an existing UniFi Network or MikroTik Router source and an active zone. Repeat for each source.
+Earlier versions assigned the target zone to already registered trackers whose Associated zone was unset during initial setup. Version 0.1.2 stops this initial bulk assignment. It **does not automatically undo earlier writes**, because doing so could discard choices made after installation. Existing rule-managed trackers remain managed and appear in the preview when the rule target changes. To opt out an individual tracker, change or clear its Associated zone in Home Assistant.
 
-To inspect existing trackers, open **Settings → Devices & services → Network Tracker Zones → Configure** for the source, then **Review mismatched trackers**. Select all or individual trackers and confirm the repair. Future clients are assigned automatically; existing manual choices are preserved unless explicitly repaired. The integration does not create tracker entities or fix upstream identity collisions.
+## Scope and limitations
+
+Supported sources are UniFi Network (`unifi`) and the custom MikroTik Router integration (`mikrotik_router`). UniFi AP Direct and Home Assistant's built-in MikroTik integration are not supported. This component cannot recover a tracker that the source integration failed to create because of an upstream unique-ID collision. It does not infer location from an access point within one source entry.
+
+A newly created tracker can briefly report the default Home state before the registry association is applied. Removing a rule leaves previously written zone options in place. The integration has been tested with Home Assistant Core **2026.9.4**; other versions require verification. For a setup failure, check **Settings → System → Logs** for `network_tracker_zones` and include the relevant error in an [issue](https://github.com/bygadd/network-tracker-zones/issues).
