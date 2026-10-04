@@ -1,7 +1,7 @@
 {
   "domain": "network_tracker_zones",
   "name": "Network Tracker Zones",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "codeowners": ["@bygadd"],
   "config_flow": true,
   "dependencies": ["zone"],

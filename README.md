@@ -6,7 +6,7 @@ It does not create trackers, poll network devices, modify source credentials, de
 
 ## Installation and configuration
 
-1. In **HACS → ⋮ → Custom repositories**, add `https://github.com/bygadd/network-tracker-zones` as an **Integration** and download it.
+1. Search for **Network Tracker Zones** in HACS and download it. Until it appears in the default catalog, use **HACS → ⋮ → Custom repositories** to add `https://github.com/bygadd/network-tracker-zones` as an **Integration**, then download it.
 2. Restart Home Assistant. HACS installs the files; configuration is performed in Home Assistant under **Settings → Devices & services → Integrations → Add integration → Network Tracker Zones**. You can also use the [direct setup link](https://my.home-assistant.io/redirect/config_flow_start/?domain=network_tracker_zones).
 3. Select an existing UniFi Network or MikroTik Router source and an active geographic zone. Add a separate rule for each source entry. A source can have only one rule.
 
